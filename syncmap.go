@@ -15,10 +15,12 @@ type ShardMap struct {
 	sync.RWMutex
 }
 
+
 func (sd *ShardMap) GetItems() map[string]interface{} {
 	return sd.items
 }
 
+// Get/Set/Delete without lock
 func (sd *ShardMap) GetNotLock(key string) (interface{}, bool) {
 	v, ok := sd.items[key]
 	return v, ok
@@ -32,6 +34,8 @@ func (sd *ShardMap) DeleteNotLock(key string) {
 	delete(sd.items, key)
 }
 
+
+// Get/Set/Delete with lock
 func (sd *ShardMap) GetWithLock(key string) (interface{}, bool) {
 	sd.RLock()
 	v, ok := sd.items[key]
@@ -51,6 +55,14 @@ func (sd *ShardMap) DeleteWithLock(key string) {
 	sd.Unlock()
 }
 
+
+
+
+////////////////
+
+
+
+
 type SyncMap struct {
 	shardCount int
 	shards     []*ShardMap
@@ -61,16 +73,22 @@ func New() *SyncMap {
 }
 
 func NewWithShard(shardCount int) *SyncMap {
+
+	// set default parameter
 	if shardCount == 0 {
 		shardCount = defaultShardCount
 	}
 
+	// create and initial
 	m := new(SyncMap)
 	m.shardCount = shardCount
 	m.shards = make([]*ShardMap, m.shardCount)
+
+	// initial inner map `items`
 	for i, _ := range m.shards {
 		m.shards[i] = &ShardMap{items: make(map[string]interface{})}
 	}
+
 	return m
 }
 
@@ -79,6 +97,7 @@ func (m *SyncMap) Locate(key string) *ShardMap {
 }
 
 func (m *SyncMap) locate(key string) *ShardMap {
+	// locate target shard according to hash(key)/(len(shards)-1)
 	return m.shards[fnv32(key)&uint32((m.shardCount-1))]
 }
 
@@ -91,7 +110,9 @@ func (m *SyncMap) GetShards() []*ShardMap {
 }
 
 func (m *SyncMap) Get(key string) (value interface{}, ok bool) {
+	// locate shard
 	shard := m.locate(key)
+	// lock shard then try get the value of key
 	shard.RLock()
 	value, ok = shard.items[key]
 	shard.RUnlock()
@@ -99,14 +120,18 @@ func (m *SyncMap) Get(key string) (value interface{}, ok bool) {
 }
 
 func (m *SyncMap) Set(key string, value interface{}) {
+	// locate shard
 	shard := m.locate(key)
+	// lock shard then set the value of key
 	shard.Lock()
 	shard.items[key] = value
 	shard.Unlock()
 }
 
 func (m *SyncMap) Delete(key string) {
+	// locate shard
 	shard := m.locate(key)
+	// lock shard then delete the key in shard
 	shard.Lock()
 	delete(shard.items, key)
 	shard.Unlock()
@@ -161,7 +186,7 @@ func (m *SyncMap) Flush() int {
 	for _, shard := range m.shards {
 		shard.Lock()
 		size += len(shard.items)
-		shard.items = make(map[string]interface{})
+		shard.items = make(map[string]interface{}) // reset?
 		shard.Unlock()
 	}
 	return size
@@ -185,6 +210,12 @@ func (m *SyncMap) EachKeyWithBreak(iter IterKeyWithBreakFunc) {
 		}
 	}
 }
+
+
+
+////////////////
+
+
 
 type Item struct {
 	Key   string
@@ -215,7 +246,7 @@ type IterItemFunc func(item *Item)
 func (m *SyncMap) EachItem(iter IterItemFunc) {
 	f := func(item *Item) bool {
 		iter(item)
-		return true
+		return true // always return true, so would never break out function `EachItemWithBreak`
 	}
 	m.EachItemWithBreak(f)
 }
